@@ -1,19 +1,3 @@
-README for the PayAI smart contract.
-
-The smart contract facilitates payment between buyers and sellers.
-The contract is built using the Anchor framework and is deployed on the Solana blockchain.
-
-Features:
-* Payment escrow
-* Payment release
-* Payment refund
-* Admin management
-
-Known limitations:
-* The same contract cannot be created more than once, meaning a buyer cannot create a contract for the same seller with the same CID and the same payment amount more than once.
-
-Please create the README below.
-
 # PayAI Smart Contract
 
 The PayAI smart contract facilitates payment between buyers and sellers. The contract is built using the Anchor framework and is deployed on the Solana blockchain.
