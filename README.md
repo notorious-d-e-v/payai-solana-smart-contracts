@@ -12,6 +12,7 @@ The PayAI smart contract facilitates payment between buyers and sellers. The con
 ## Known Limitations
 
 * The same contract cannot be created more than once, meaning a buyer cannot create a contract for the same seller with the same CID and the same payment amount more than once.
+* The unit tests do not reset the blockchain state between tests, therefore order matters. 
 
 ## Installation
 

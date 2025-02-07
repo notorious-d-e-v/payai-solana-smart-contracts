@@ -63,7 +63,6 @@ pub mod payai_marketplace {
     ) -> Result<()> {
         // increment the buyer's contract counter
         let counter = &mut ctx.accounts.buyer_contract_counter;
-        counter.counter = counter.counter.checked_add(1).unwrap();
 
         // create a new contract account
         let contract = &mut ctx.accounts.contract;
@@ -72,18 +71,26 @@ pub mod payai_marketplace {
         contract.buyer = signer.key();
         contract.seller = payout_address;
         contract.amount = escrow_amount;
+        contract.buyer_counter = counter.counter;
         contract.is_released = false;
 
-        // Transfer SOL from buyer to contract account
-        let ix = system_instruction::transfer(&signer.key(), &contract.key(), escrow_amount);
-        invoke_signed(
+        // increment the buyer's contract counter
+        counter.counter = counter.counter.checked_add(1).unwrap();
+
+        // Transfer SOL from buyer to contract escrow
+        let ix = system_instruction::transfer(
+            &signer.key(),
+            &ctx.accounts.escrow_vault.key(),
+            escrow_amount,
+        );
+        // No PDA signing is needed here since the buyer is the signer
+        anchor_lang::solana_program::program::invoke(
             &ix,
             &[
                 signer.to_account_info(),
-                contract.to_account_info(),
+                ctx.accounts.escrow_vault.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
             ],
-            &[],
         )?;
 
         Ok(())
@@ -115,25 +122,34 @@ pub mod payai_marketplace {
         require!(!contract.is_released, PayAiError::AlreadyReleased);
         contract.is_released = true;
 
-        // transfer funds from escrow to the seller
-        let seeds = &[
-            b"contract".as_ref(),
-            contract.buyer.as_ref(),
-        ];
-        let bump = ctx.bumps.contract;
-        let bump_binding = [bump];
-        let signer_seeds = &[&[seeds[0], seeds[1], &bump_binding][..]];
+        // Transfer funds from escrow vault to seller
+        let vault_account = ctx.accounts.escrow_vault.to_account_info();
+        let seller_account = ctx.accounts.seller.to_account_info();
 
-        let ix = system_instruction::transfer(&contract.key(), &contract.seller.key(), contract.amount);
+        // Re-derive the escrow vault PDA seeds using the contract's address
+        let vault_bump = ctx.bumps.escrow_vault;
+        let contract_key = contract.key();
+        let vault_seeds = &[
+            b"escrow_vault".as_ref(),
+            contract_key.as_ref(),
+            &[vault_bump],
+        ];
+
+        let transfer_ix = system_instruction::transfer(
+            &ctx.accounts.escrow_vault.key(),
+            &seller_account.key(),
+            contract.amount,
+        );
+
         invoke_signed(
-            &ix,
+            &transfer_ix,
             &[
-                contract.to_account_info(),
-                ctx.accounts.seller.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
+                vault_account,
+                seller_account
             ],
-            signer_seeds,
+            &[vault_seeds],
         )?;
+
         Ok(())
     }
 
@@ -149,29 +165,37 @@ pub mod payai_marketplace {
             PayAiError::Unauthorized
         );
 
-        // Transfer funds from escrow back to the Buyer.
-        let seeds = &[
-            b"contract".as_ref(),
-            contract.buyer.as_ref(),
-        ];
-        let bump = ctx.bumps.contract;
-        let bump_binding = [bump];
-        let signer_seeds = &[&[seeds[0], seeds[1], &bump_binding][..]];
+        // Transfer funds from escrow vault back to the Buyer
+        let vault_account = ctx.accounts.escrow_vault.to_account_info();
+        let buyer_account = ctx.accounts.buyer.to_account_info();
 
-        let ix = system_instruction::transfer(&contract.key(), &contract.buyer.key(), contract.amount);
+        // Re-derive the escrow vault PDA seeds using the contract's address
+        let vault_bump = ctx.bumps.escrow_vault;
+        let contract_key = contract.key();
+        let vault_seeds = &[
+            b"escrow_vault".as_ref(),
+            contract_key.as_ref(),
+            &[vault_bump],
+        ];
+
+        let transfer_ix = system_instruction::transfer(
+            &ctx.accounts.escrow_vault.key(),
+            &buyer_account.key(),
+            contract.amount,
+        );
+
         invoke_signed(
-            &ix,
+            &transfer_ix,
             &[
-                contract.to_account_info(),
-                ctx.accounts.buyer.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
+                vault_account,
+                buyer_account
             ],
-            signer_seeds,
+            &[vault_seeds],
         )?;
+
         Ok(())
     }
 }
-
 
 #[account]
 pub struct BuyerContractCounter {
@@ -205,12 +229,13 @@ pub struct Contract {
     pub buyer: Pubkey,    // buyer's wallet address
     pub seller: Pubkey,   // seller's payout address
     pub amount: u64,      // escrow amount
+    pub buyer_counter: u64,  // the counter value used in the PDA derivation
     pub is_released: bool // whether the payment has been released
 }
 
 impl Contract {
     // Calculate the required space. Adjust the size of the string as needed.
-    pub const LEN: usize = 64 + 32 + 32 + 8 + 1;
+    pub const LEN: usize = 64 + 32 + 32 + 8 + 8 + 1;
 }
 
 #[derive(Accounts)]
@@ -239,6 +264,17 @@ pub struct StartContract<'info> {
     )]
     pub contract: Account<'info, Contract>,
 
+    /// the escrow vault holds the funds and is derived using the contract's address
+    #[account(
+        mut,
+        seeds = [
+            b"escrow_vault",
+            contract.key().as_ref()
+        ],
+        bump
+    )]
+    pub escrow_vault: SystemAccount<'info>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -253,22 +289,26 @@ pub struct ReleasePayment<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    /// CHECK: this is the seller's wallet address, won't be used in the transfer instruction
-    #[account(mut)]
-    pub seller: AccountInfo<'info>,
-
-    /// CHECK: this is the buyer's wallet address, won't be used in the transfer instruction
-    #[account(mut)]
-    pub buyer: AccountInfo<'info>,
-
     #[account(
         mut,
-        has_one = buyer,
-        has_one = seller,
-        seeds = [b"contract", buyer.key().as_ref()],
+        seeds = [
+            b"contract",
+            contract.buyer.as_ref(),
+            &contract.buyer_counter.to_le_bytes()
+        ],
         bump
     )]
     pub contract: Account<'info, Contract>,
+
+    #[account(
+        mut,
+        seeds = [b"escrow_vault", contract.key().as_ref()],
+        bump
+    )]
+    pub escrow_vault: SystemAccount<'info>,
+
+    #[account(mut, address = contract.seller)]
+    pub seller: SystemAccount<'info>,
 
     #[account(mut)]
     pub global_state: Account<'info, GlobalState>,
@@ -276,23 +316,32 @@ pub struct ReleasePayment<'info> {
     pub system_program: Program<'info, System>,
 }
 
+
 #[derive(Accounts)]
 pub struct RefundBuyer<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    /// CHECK: this is the buyer's wallet address, won't be used in the transfer instruction
-    #[account(mut)]
-    pub buyer: AccountInfo<'info>,
-
-    /// TODO is the has_one enough or do we need to add more?
     #[account(
         mut,
-        has_one = buyer,
-        seeds = [b"contract", buyer.key().as_ref()],
+        seeds = [
+            b"contract",
+            contract.buyer.as_ref(),
+            &contract.buyer_counter.to_le_bytes()
+        ],
         bump
     )]
     pub contract: Account<'info, Contract>,
+
+    #[account(
+        mut,
+        seeds = [b"escrow_vault", contract.key().as_ref()],
+        bump
+    )]
+    pub escrow_vault: SystemAccount<'info>,
+
+    #[account(mut, address = contract.buyer)]
+    pub buyer: SystemAccount<'info>,
 
     #[account(mut)]
     pub global_state: Account<'info, GlobalState>,
