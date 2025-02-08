@@ -12,8 +12,14 @@ describe("payai-marketplace", () => {
   const globalStateSeed = "global_state";
   const contractSeed = "contract";
   const contractCounterSeed = "buyer_contract_counter";
+  const platformFeeSeed = "platform_fee_vault";
 
   let globalStatePDA;
+  let platformFeePDA = anchor.web3.PublicKey.findProgramAddressSync([
+    Buffer.from(platformFeeSeed),
+  ], program.programId);
+
+  let _currentAdmin;
 
   it("cannot initialize global state as non-default admin", async () => {
     // airdrop 2 SOL to non-admin
@@ -196,9 +202,10 @@ describe("payai-marketplace", () => {
 
     // assert that the seller's balance has increased
     const sellerBalanceAfter = await program.provider.connection.getBalance(serviceSeller.publicKey);
+    const globalState = await program.account.globalState.fetch(globalStatePDA);
     assert.equal(
       sellerBalanceAfter - sellerBalanceBefore,
-      payoutAmount.toNumber()
+      payoutAmount * (100 - globalState.sellerFeePct) / 100
     );
   });
 
@@ -245,9 +252,10 @@ describe("payai-marketplace", () => {
 
     // assert that the seller's balance has increased
     const sellerBalanceAfter = await program.provider.connection.getBalance(serviceSeller.publicKey);
+    const globalState = await program.account.globalState.fetch(globalStatePDA);
     assert.equal(
       sellerBalanceAfter - sellerBalanceBefore,
-      payoutAmount.toNumber()
+      payoutAmount * (100 - globalState.sellerFeePct) / 100
     );
   });
 
@@ -290,9 +298,11 @@ describe("payai-marketplace", () => {
 
     // assert that the buyer's balance has increased
     const buyerBalanceAfter = await program.provider.connection.getBalance(buyer.publicKey);
+    const globalState = await program.account.globalState.fetch(globalStatePDA);
+    const buyerFeePlusPayout = payoutAmount.add(payoutAmount.mul(new anchor.BN(globalState.buyerFeePct)).div(new anchor.BN(100)));
     assert.equal(
       buyerBalanceAfter - buyerBalanceBefore,
-      payoutAmount.toNumber()
+      buyerFeePlusPayout
     );
   });
 
@@ -365,6 +375,7 @@ describe("payai-marketplace", () => {
       })
       .signers([])
       .rpc();
+    _currentAdmin = newAdmin;
 
     // fetch the updated global state
     const globalState = await program.account.globalState.fetch(globalStatePDA);
@@ -395,6 +406,185 @@ describe("payai-marketplace", () => {
         .rpc();
 
         assert.fail("Expected error not thrown");
+    } catch (error) {
+      assert.equal(error.error.errorCode.code, "Unauthorized");
+    }
+  });
+
+  it("sends fees to platform fee vault on successful completion of a contract", async () => {
+    // airdrop 4 SOL to buyer
+    const buyer = anchor.web3.Keypair.generate();
+    await program.provider.connection.confirmTransaction(
+      await program.provider.connection.requestAirdrop(
+        buyer.publicKey, 4 * anchor.web3.LAMPORTS_PER_SOL
+      ),
+      "confirmed"
+    );
+
+    // create accounts
+    const serviceSeller = anchor.web3.Keypair.generate();
+
+    // initialize buyer's contract counter account
+    await initBuyerContractCounterTestHelper(buyer);
+
+    // start contract
+    const cid = "QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB";
+    const payoutAmount = new anchor.BN(1 * anchor.web3.LAMPORTS_PER_SOL);
+    const {pda: contractPDA} = await startContractTestHelper(cid, serviceSeller.publicKey, payoutAmount, buyer);
+
+    // platform fee vault balance before payment release
+    const platformFeeVaultBalanceBefore = await program.provider.connection.getBalance(platformFeePDA[0]);
+
+    // release payment
+    await program.methods
+      .releasePayment()
+      .accounts({
+        signer: buyer.publicKey,
+        seller: serviceSeller.publicKey,
+        contract: contractPDA,
+        globalState: globalStatePDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // check if payment is released
+    const updatedContract = await program.account.contract.fetch(contractPDA);
+    assert.isTrue(updatedContract.isReleased);
+
+    // assert that the platform fee vault balance has increased by buyer_fee_pct
+    // and seller_fee_pct of the payout amount
+    const globalState = await program.account.globalState.fetch(globalStatePDA);
+    const buyerFee = payoutAmount.mul(new anchor.BN(globalState.buyerFeePct)).div(new anchor.BN(100));
+    const sellerFee = payoutAmount.mul(new anchor.BN(globalState.sellerFeePct)).div(new anchor.BN(100));
+    const platformFeeVaultBalanceAfter = await program.provider.connection.getBalance(platformFeePDA[0]);
+    assert.equal(
+      platformFeeVaultBalanceAfter - platformFeeVaultBalanceBefore,
+      buyerFee.add(sellerFee).toNumber()
+    );
+  });
+
+  it("admin can collect platform fees", async () => {
+    // platform fee vault balance before collecting fees
+    const platformFeeVaultBalanceBefore = await program.provider.connection.getBalance(platformFeePDA[0]);
+
+    // admin balance before collecting fees
+    const adminBalanceBefore = await program.provider.connection.getBalance(_currentAdmin.publicKey);
+
+    // collect platform fees
+    await program.methods
+      .collectPlatformFees()
+      .accounts({
+        signer: _currentAdmin.publicKey,
+        admin: _currentAdmin.publicKey,
+        globalState: globalStatePDA,
+        platformFeeVault: platformFeePDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([_currentAdmin])
+      .rpc();
+
+    // assert that the platform fee vault balance is zero
+    const platformFeeVaultBalanceAfter = await program.provider.connection.getBalance(platformFeePDA[0]);
+    assert.equal(platformFeeVaultBalanceAfter, 0);
+
+    // assert that the admin's balance has increased by the platform fee vault balance
+    const adminBalanceAfter = await program.provider.connection.getBalance(_currentAdmin.publicKey);
+    assert.equal(
+      adminBalanceAfter - adminBalanceBefore,
+      platformFeeVaultBalanceBefore
+    );
+  });
+
+  it("admin can update buyer fee", async () => {
+    const newBuyerFee = new anchor.BN(2);
+
+    // update buyer fee
+    await program.methods
+      .updateBuyerFee(newBuyerFee)
+      .accounts({
+        signer: _currentAdmin.publicKey,
+        globalState: globalStatePDA,
+      })
+      .signers([_currentAdmin])
+      .rpc();
+
+    // fetch the updated global state
+    const globalState = await program.account.globalState.fetch(globalStatePDA);
+    assert.equal(globalState.buyerFeePct.toNumber(), newBuyerFee.toNumber());
+  });
+
+  it("admin can update seller fee", async () => {
+    const newSellerFee = new anchor.BN(2);
+
+    // update seller fee
+    await program.methods
+      .updateSellerFee(newSellerFee)
+      .accounts({
+        signer: _currentAdmin.publicKey,
+        globalState: globalStatePDA,
+      })
+      .signers([_currentAdmin])
+      .rpc();
+
+    // fetch the updated global state
+    const globalState = await program.account.globalState.fetch(globalStatePDA);
+    assert.equal(globalState.sellerFeePct.toNumber(), newSellerFee.toNumber());
+  });
+
+  it("non-admin cannot update buyer fee", async () => {
+    const newBuyerFee = new anchor.BN(2);
+
+    // airdrop 2 SOL to non-admin
+    const nonAdmin = anchor.web3.Keypair.generate();
+    await program.provider.connection.confirmTransaction(
+      await program.provider.connection.requestAirdrop(
+        nonAdmin.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL
+      ),
+      "confirmed"
+    );
+
+    // try to update buyer fee by non-admin
+    try {
+      await program.methods
+        .updateBuyerFee(newBuyerFee)
+        .accounts({
+          signer: nonAdmin.publicKey,
+          globalState: globalStatePDA,
+        })
+        .signers([nonAdmin])
+        .rpc();
+
+      assert.fail("Expected error not thrown");
+    } catch (error) {
+      assert.equal(error.error.errorCode.code, "Unauthorized");
+    }
+  });
+
+  it("non-admin cannot update seller fee", async () => {
+    const newSellerFee = new anchor.BN(2);
+
+    // airdrop 2 SOL to non-admin
+    const nonAdmin = anchor.web3.Keypair.generate();
+    await program.provider.connection.confirmTransaction(
+      await program.provider.connection.requestAirdrop(
+        nonAdmin.publicKey, 2 * anchor.web3.LAMPORTS_PER_SOL
+      ),
+      "confirmed"
+    );
+
+    // try to update seller fee by non-admin
+    try {
+      await program.methods
+        .updateSellerFee(newSellerFee)
+        .accounts({
+          signer: nonAdmin.publicKey,
+          globalState: globalStatePDA,
+        })
+        .signers([nonAdmin])
+        .rpc();
+
+      assert.fail("Expected error not thrown");
     } catch (error) {
       assert.equal(error.error.errorCode.code, "Unauthorized");
     }
@@ -465,6 +655,7 @@ describe("payai-marketplace", () => {
       )
       .accounts({
         signer: signer.publicKey,
+        globalState: globalStatePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([signer])

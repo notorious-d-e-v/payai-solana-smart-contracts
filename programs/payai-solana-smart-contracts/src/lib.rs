@@ -14,6 +14,7 @@ pub const DEFAULT_ADMIN: Pubkey = Pubkey::new_from_array([
     247,80,58,198,87,121,0,147
 ]);
 
+pub const FEE_DIVISOR: u64 = 100; // divisor for percentage calculation
 
 #[program]
 pub mod payai_marketplace {
@@ -29,6 +30,9 @@ pub mod payai_marketplace {
 
         let global_state = &mut ctx.accounts.global_state;
         global_state.admin = DEFAULT_ADMIN;
+        global_state.buyer_fee_pct = 1;
+        global_state.seller_fee_pct = 1;
+        
         Ok(())
     }
 
@@ -77,11 +81,18 @@ pub mod payai_marketplace {
         // increment the buyer's contract counter
         counter.counter = counter.counter.checked_add(1).unwrap();
 
+        let global_state = &ctx.accounts.global_state;
+
+        // Calculate the total amount to be transferred (take fee from buyer)
+        require!(escrow_amount > 0, PayAiError::InvalidAmount);
+        let buyer_fee = escrow_amount.checked_div(FEE_DIVISOR).unwrap().checked_mul(global_state.buyer_fee_pct).unwrap();
+        let total_amount = escrow_amount.checked_add(buyer_fee).unwrap();
+
         // Transfer SOL from buyer to contract escrow
         let ix = system_instruction::transfer(
             &signer.key(),
             &ctx.accounts.escrow_vault.key(),
-            escrow_amount,
+            total_amount,
         );
         // No PDA signing is needed here since the buyer is the signer
         anchor_lang::solana_program::program::invoke(
@@ -122,9 +133,16 @@ pub mod payai_marketplace {
         require!(!contract.is_released, PayAiError::AlreadyReleased);
         contract.is_released = true;
 
+        let global_state = &ctx.accounts.global_state;
+
+        // Calculate the fee amounts
+        let seller_fee = contract.amount.checked_div(FEE_DIVISOR).unwrap().checked_mul(global_state.seller_fee_pct).unwrap();
+        let payout_amount = contract.amount.checked_sub(seller_fee).unwrap();
+
         // Transfer funds from escrow vault to seller
         let vault_account = ctx.accounts.escrow_vault.to_account_info();
         let seller_account = ctx.accounts.seller.to_account_info();
+        let platform_fee_vault = ctx.accounts.platform_fee_vault.to_account_info();
 
         // Re-derive the escrow vault PDA seeds using the contract's address
         let vault_bump = ctx.bumps.escrow_vault;
@@ -135,17 +153,34 @@ pub mod payai_marketplace {
             &[vault_bump],
         ];
 
-        let transfer_ix = system_instruction::transfer(
+        // Transfer payout amount to seller
+        let transfer_to_seller_ix = system_instruction::transfer(
             &ctx.accounts.escrow_vault.key(),
             &seller_account.key(),
-            contract.amount,
+            payout_amount,
         );
 
         invoke_signed(
-            &transfer_ix,
+            &transfer_to_seller_ix,
+            &[
+                vault_account.clone(),
+                seller_account.clone()
+            ],
+            &[vault_seeds],
+        )?;
+
+        // Transfer remaining funds to platform fee vault
+        let transfer_to_platform_fee_vault_ix = system_instruction::transfer(
+            &ctx.accounts.escrow_vault.key(),
+            &platform_fee_vault.key(),
+            vault_account.lamports(),
+        );
+
+        invoke_signed(
+            &transfer_to_platform_fee_vault_ix,
             &[
                 vault_account,
-                seller_account
+                platform_fee_vault
             ],
             &[vault_seeds],
         )?;
@@ -181,7 +216,7 @@ pub mod payai_marketplace {
         let transfer_ix = system_instruction::transfer(
             &ctx.accounts.escrow_vault.key(),
             &buyer_account.key(),
-            contract.amount,
+            vault_account.lamports(),
         );
 
         invoke_signed(
@@ -193,6 +228,73 @@ pub mod payai_marketplace {
             &[vault_seeds],
         )?;
 
+        Ok(())
+    }
+
+    /// collects platform fees
+    pub fn collect_platform_fees(ctx: Context<CollectPlatformFees>) -> Result<()> {
+        let signer = &ctx.accounts.signer;
+        let admin = ctx.accounts.global_state.admin;
+
+        // Ensure that only the admin can collect fees
+        require!(
+            signer.key() == admin,
+            PayAiError::Unauthorized
+        );
+
+        // Transfer all funds from platform fee vault to admin
+        let platform_fee_vault = ctx.accounts.platform_fee_vault.to_account_info();
+        let admin_account = ctx.accounts.admin.to_account_info();
+        let platform_fee_vault_balance = platform_fee_vault.lamports();
+
+        let vault_bump = ctx.bumps.platform_fee_vault;
+        let vault_seeds = &[
+            b"platform_fee_vault".as_ref(),
+            &[vault_bump],
+        ];
+
+        let transfer_ix = system_instruction::transfer(
+            &platform_fee_vault.key(),
+            &admin_account.key(),
+            platform_fee_vault_balance,
+        );
+        invoke_signed(
+            &transfer_ix,
+            &[
+                platform_fee_vault,
+                admin_account
+            ],
+            &[vault_seeds],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn update_buyer_fee(ctx: Context<UpdateFee>, new_fee: u64) -> Result<()> {
+        let global_state = &mut ctx.accounts.global_state;
+        let signer = &ctx.accounts.signer;
+
+        // only the current admin can update the buyer fee
+        require!(
+            signer.key() == global_state.admin,
+            PayAiError::Unauthorized
+        );
+
+        global_state.buyer_fee_pct = new_fee;
+        Ok(())
+    }
+
+    pub fn update_seller_fee(ctx: Context<UpdateFee>, new_fee: u64) -> Result<()> {
+        let global_state = &mut ctx.accounts.global_state;
+        let signer = &ctx.accounts.signer;
+
+        // only the current admin can update the seller fee
+        require!(
+            signer.key() == global_state.admin,
+            PayAiError::Unauthorized
+        );
+
+        global_state.seller_fee_pct = new_fee;
         Ok(())
     }
 }
@@ -275,6 +377,9 @@ pub struct StartContract<'info> {
     )]
     pub escrow_vault: SystemAccount<'info>,
 
+    #[account(mut)]
+    pub global_state: Account<'info, GlobalState>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -313,9 +418,15 @@ pub struct ReleasePayment<'info> {
     #[account(mut)]
     pub global_state: Account<'info, GlobalState>,
 
+    #[account(
+        mut,
+        seeds = [b"platform_fee_vault"],
+        bump
+    )]
+    pub platform_fee_vault: SystemAccount<'info>,
+
     pub system_program: Program<'info, System>,
 }
-
 
 #[derive(Accounts)]
 pub struct RefundBuyer<'info> {
@@ -358,13 +469,45 @@ pub struct UpdateAdmin<'info> {
     pub global_state: Account<'info, GlobalState>,
 }
 
+#[derive(Accounts)]
+pub struct CollectPlatformFees<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+
+    #[account(mut)]
+    pub global_state: Account<'info, GlobalState>,
+
+    #[account(
+        mut,
+        seeds = [b"platform_fee_vault"],
+        bump
+    )]
+    pub platform_fee_vault: SystemAccount<'info>,
+
+    #[account(mut, address = global_state.admin)]
+    pub admin: SystemAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateFee<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+
+    #[account(mut)]
+    pub global_state: Account<'info, GlobalState>,
+}
+
 #[account]
 pub struct GlobalState {
     pub admin: Pubkey,  // the current admin
+    pub buyer_fee_pct: u64,  // buyer fee percentage
+    pub seller_fee_pct: u64,  // seller fee percentage
 }
 
 impl GlobalState {
-    pub const LEN: usize = 32;
+    pub const LEN: usize = 32 + 8 + 8;
 }
 
 #[derive(Accounts)]
@@ -391,5 +534,8 @@ pub enum PayAiError {
 
     #[msg("Payment has already been released")]
     AlreadyReleased,
+
+    #[msg("Invalid escrow amount")]
+    InvalidAmount,
 }
 
