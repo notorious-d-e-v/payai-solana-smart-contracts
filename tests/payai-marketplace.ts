@@ -10,8 +10,9 @@ describe("payai-marketplace", () => {
   const program = anchor.workspace.PayaiMarketplace as Program<PayaiMarketplace>;
 
   const globalStateSeed = "global_state";
-  const contractSeed = "contract";
   const contractCounterSeed = "buyer_contract_counter";
+  const contractSeed = "contract";
+  const contractEscrowSeed = "escrow_vault";
   const platformFeeSeed = "platform_fee_vault";
 
   let globalStatePDA;
@@ -303,6 +304,64 @@ describe("payai-marketplace", () => {
     );
   });
 
+  it("can refund a previous contract from a buyer", async () => {
+    // airdrop 4 SOL to buyer
+    const buyer = anchor.web3.Keypair.generate();
+    await program.provider.connection.confirmTransaction(
+      await program.provider.connection.requestAirdrop(
+        buyer.publicKey, 4 * anchor.web3.LAMPORTS_PER_SOL
+      ),
+      "confirmed"
+    );
+
+    // create accounts
+    const serviceSeller = anchor.web3.Keypair.generate();
+
+    // initialize buyer's contract counter account
+    await initBuyerContractCounterTestHelper(buyer);
+
+    // start contract
+    const cid = "QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB";
+    const payoutAmount = new anchor.BN(1 * anchor.web3.LAMPORTS_PER_SOL);
+    const {pda: firstContractPDA} = await startContractTestHelper(cid, serviceSeller.publicKey, payoutAmount, buyer);
+    const [firstContractEscrowPDA] = anchor.web3.PublicKey.findProgramAddressSync([
+      Buffer.from(contractEscrowSeed),
+      firstContractPDA.toBuffer()
+    ], program.programId);
+    const firstContractEscrowBalanceBefore = await program.provider.connection.getBalance(firstContractEscrowPDA);
+
+    // start another contract
+    const newCid = "QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqC";
+    const newPayoutAmount = new anchor.BN(2 * anchor.web3.LAMPORTS_PER_SOL);
+    const {pda: secondContractPDA} = await startContractTestHelper(newCid, serviceSeller.publicKey, newPayoutAmount, buyer);
+    const [secondContractEscrowPDA] = anchor.web3.PublicKey.findProgramAddressSync([
+      Buffer.from(contractEscrowSeed),
+      secondContractPDA.toBuffer()
+    ], program.programId);
+    const secondContractEscrowBalanceBefore = await program.provider.connection.getBalance(secondContractEscrowPDA);
+
+    // refund buyer's first contract
+    await program.methods
+      .refundBuyer()
+      .accounts({
+        signer: program.provider.wallet.publicKey,
+        buyer: buyer.publicKey,
+        contract: firstContractPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([])
+      .rpc();
+
+    // assert that the first contract's escrow balance is now 0
+    const firstContractEscrowBalanceAfter = await program.provider.connection.getBalance(firstContractEscrowPDA);
+    assert.equal(firstContractEscrowBalanceAfter, 0);
+    assert.notEqual(firstContractEscrowBalanceAfter, firstContractEscrowBalanceBefore);
+
+    // assert that the second contract's balance is still the same
+    const secondContractEscrowBalanceAfter = await program.provider.connection.getBalance(secondContractEscrowPDA);
+    assert.equal(secondContractEscrowBalanceAfter, secondContractEscrowBalanceBefore);
+  });
+
   it("non-admin cannot refund buyer", async () => {
     // airdrop 4 SOL to buyer
     const buyer = anchor.web3.Keypair.generate();
@@ -436,7 +495,6 @@ describe("payai-marketplace", () => {
         signer: buyer.publicKey,
         seller: serviceSeller.publicKey,
         contract: contractPDA,
-        globalState: globalStatePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([buyer])
@@ -471,7 +529,6 @@ describe("payai-marketplace", () => {
       .accounts({
         signer: _currentAdmin.publicKey,
         admin: _currentAdmin.publicKey,
-        globalState: globalStatePDA,
         platformFeeVault: platformFeePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
