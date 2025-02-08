@@ -377,7 +377,11 @@ pub struct StartContract<'info> {
     )]
     pub escrow_vault: SystemAccount<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"global_state", ID.as_ref()],
+        bump
+    )]
     pub global_state: Account<'info, GlobalState>,
 
     pub system_program: Program<'info, System>,
@@ -415,7 +419,11 @@ pub struct ReleasePayment<'info> {
     #[account(mut, address = contract.seller)]
     pub seller: SystemAccount<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"global_state", ID.as_ref()],
+        bump
+    )]
     pub global_state: Account<'info, GlobalState>,
 
     #[account(
@@ -454,7 +462,11 @@ pub struct RefundBuyer<'info> {
     #[account(mut, address = contract.buyer)]
     pub buyer: SystemAccount<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"global_state", ID.as_ref()],
+        bump
+    )]
     pub global_state: Account<'info, GlobalState>,
 
     pub system_program: Program<'info, System>,
@@ -465,7 +477,11 @@ pub struct UpdateAdmin<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"global_state", ID.as_ref()],
+        bump
+    )]
     pub global_state: Account<'info, GlobalState>,
 }
 
@@ -474,7 +490,11 @@ pub struct CollectPlatformFees<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"global_state", ID.as_ref()],
+        bump
+    )]
     pub global_state: Account<'info, GlobalState>,
 
     #[account(
@@ -495,7 +515,11 @@ pub struct UpdateFee<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"global_state", ID.as_ref()],
+        bump
+    )]
     pub global_state: Account<'info, GlobalState>,
 }
 

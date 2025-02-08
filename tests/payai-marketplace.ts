@@ -190,7 +190,6 @@ describe("payai-marketplace", () => {
         signer: buyer.publicKey,
         seller: serviceSeller.publicKey,
         contract: contractPDA,
-        globalState: globalStatePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([buyer])
@@ -240,7 +239,6 @@ describe("payai-marketplace", () => {
         signer: program.provider.wallet.publicKey,
         seller: serviceSeller.publicKey,
         contract: contractPDA,
-        globalState: globalStatePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([])
@@ -290,7 +288,6 @@ describe("payai-marketplace", () => {
         signer: program.provider.wallet.publicKey,
         buyer: buyer.publicKey,
         contract: contractPDA,
-        globalState: globalStatePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([])
@@ -344,7 +341,6 @@ describe("payai-marketplace", () => {
           signer: nonAdmin.publicKey,
           buyer: buyer.publicKey,
           contract: contractPDA,
-          globalState: globalStatePDA,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([nonAdmin])
@@ -371,7 +367,6 @@ describe("payai-marketplace", () => {
       .updateAdmin(newAdmin.publicKey)
       .accounts({
         signer: program.provider.wallet.publicKey,
-        globalState: globalStatePDA,
       })
       .signers([])
       .rpc();
@@ -400,7 +395,6 @@ describe("payai-marketplace", () => {
         .updateAdmin(newAdmin.publicKey)
         .accounts({
           signer: program.provider.wallet.publicKey,
-          globalState: globalStatePDA,
         })
         .signers([])
         .rpc();
@@ -504,7 +498,6 @@ describe("payai-marketplace", () => {
       .updateBuyerFee(newBuyerFee)
       .accounts({
         signer: _currentAdmin.publicKey,
-        globalState: globalStatePDA,
       })
       .signers([_currentAdmin])
       .rpc();
@@ -522,7 +515,6 @@ describe("payai-marketplace", () => {
       .updateSellerFee(newSellerFee)
       .accounts({
         signer: _currentAdmin.publicKey,
-        globalState: globalStatePDA,
       })
       .signers([_currentAdmin])
       .rpc();
@@ -550,7 +542,6 @@ describe("payai-marketplace", () => {
         .updateBuyerFee(newBuyerFee)
         .accounts({
           signer: nonAdmin.publicKey,
-          globalState: globalStatePDA,
         })
         .signers([nonAdmin])
         .rpc();
@@ -579,7 +570,6 @@ describe("payai-marketplace", () => {
         .updateSellerFee(newSellerFee)
         .accounts({
           signer: nonAdmin.publicKey,
-          globalState: globalStatePDA,
         })
         .signers([nonAdmin])
         .rpc();
@@ -655,7 +645,6 @@ describe("payai-marketplace", () => {
       )
       .accounts({
         signer: signer.publicKey,
-        globalState: globalStatePDA,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([signer])
