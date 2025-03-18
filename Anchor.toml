@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-payai_marketplace = "DKgspHjnwuPZfYWKHdZwVCTZKtNX4TdpASTGoqxpcmtt"
+payai_marketplace = "EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1"
 
 [registry]
 url = "https://api.apr.dev"
@@ -16,3 +16,5 @@ wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+generate-clients = "yarn ts-node ./scripts/generate-clients.ts"
+init-global-state = "yarn ts-node ./scripts/init-global-state.ts"

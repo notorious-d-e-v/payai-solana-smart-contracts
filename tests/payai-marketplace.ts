@@ -649,8 +649,7 @@ describe("payai-marketplace", () => {
 
     // return the global state
     const [pda] = anchor.web3.PublicKey.findProgramAddressSync([
-      Buffer.from(globalStateSeed),
-      program.programId.toBuffer()
+      Buffer.from(globalStateSeed)
     ], program.programId);
     const data = await program.account.globalState.fetch(pda);
 

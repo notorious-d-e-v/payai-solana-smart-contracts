@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{system_instruction, program::invoke_signed};
 use anchor_lang::system_program;
 
-declare_id!("DKgspHjnwuPZfYWKHdZwVCTZKtNX4TdpASTGoqxpcmtt");
+declare_id!("EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1");
 
 // the current admin will be initialized to this
 // the current admin can be updated by calling the update_admin instruction
@@ -379,7 +379,7 @@ pub struct StartContract<'info> {
 
     #[account(
         mut,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
@@ -421,7 +421,7 @@ pub struct ReleasePayment<'info> {
 
     #[account(
         mut,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
@@ -464,7 +464,7 @@ pub struct RefundBuyer<'info> {
 
     #[account(
         mut,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
@@ -479,7 +479,7 @@ pub struct UpdateAdmin<'info> {
 
     #[account(
         mut,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
@@ -492,7 +492,7 @@ pub struct CollectPlatformFees<'info> {
 
     #[account(
         mut,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
@@ -517,7 +517,7 @@ pub struct UpdateFee<'info> {
 
     #[account(
         mut,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
@@ -543,7 +543,7 @@ pub struct InitializeGlobalState<'info> {
         init,
         payer = signer,
         space = 8 + GlobalState::LEN,
-        seeds = [b"global_state", ID.as_ref()],
+        seeds = [b"global_state"],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
