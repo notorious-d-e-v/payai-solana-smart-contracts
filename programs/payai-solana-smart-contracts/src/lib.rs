@@ -1,8 +1,20 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{system_instruction, program::invoke_signed};
 use anchor_lang::system_program;
+use solana_security_txt::security_txt;
 
 declare_id!("5FhmaXvWm1FZ3bpsE5rxkey5pNWDLkvaGAzoGkTUZfZ3");
+
+#[cfg(not(feature = "no-entrypoint"))]
+security_txt! {
+    name: "PayAI",
+    project_url: "https://payai.network",
+    contacts: "email:notorious_d_e_v@proton.me,twitter:notorious_d_e_v",
+    policy: "https://github.com/notorious-d-e-v/payai-solana-smart-contracts/SECURITY.md",
+    preferred_languages: "en",
+    source_code: "https://github.com/notorious-d-e-v/payai-solana-smart-contracts",
+    acknowledgements: "Thank you to all the security researchers out there."
+}
 
 // the current admin will be initialized to this
 // the current admin can be updated by calling the update_admin instruction
