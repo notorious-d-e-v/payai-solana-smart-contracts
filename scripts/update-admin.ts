@@ -33,9 +33,10 @@ const program = new Program(idl as PayaiMarketplace, provider);
 
 async function main() {
   try {
-    await program.methods.initializeGlobalState().rpc();
+    const newAdmin = process.argv[4];
+    await program.methods.updateAdmin(new PublicKey(newAdmin)).rpc();
     
-    console.log("Global state initialized successfully");
+    console.log("Admin updated successfully");
   } catch (error) {
     console.error("Error:", error);
   }

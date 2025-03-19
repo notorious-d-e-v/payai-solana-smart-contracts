@@ -2,16 +2,14 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{system_instruction, program::invoke_signed};
 use anchor_lang::system_program;
 
-declare_id!("EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1");
+declare_id!("5FhmaXvWm1FZ3bpsE5rxkey5pNWDLkvaGAzoGkTUZfZ3");
 
 // the current admin will be initialized to this
 // the current admin can be updated by calling the update_admin instruction
 // TODO change this to the actual admin wallet before deploying
 pub const DEFAULT_ADMIN: Pubkey = Pubkey::new_from_array([
-    149,5,172,186,118,202,88,55,
-    85,178,133,131,38,235,51,148,
-    185,110,122,25,211,16,147,15,
-    247,80,58,198,87,121,0,147
+    184,175,133,50,132,11,12,153,72,255,30,50,136,29,214,73,
+    175,176,56,12,143,185,143,59,233,44,227,89,229,42,0,11
 ]);
 
 pub const FEE_DIVISOR: u64 = 100; // divisor for percentage calculation
